@@ -169,11 +169,5 @@ export const truncateHome = (req, res) => {
   });
 };
 
-export {
-  getHome,
-  createHome,
-  updateHome,
-  deleteHome,
-  truncateHome,
-};
+
 
