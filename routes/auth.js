@@ -10,7 +10,7 @@ import {
   createProducts, deleteProducts, getProducts, truncateProducts, updateProducts 
 } from "../controllerrs/productControllers.js";
 import { 
-  createShowcase, deleteShowcase, getShowcase, truncateshowCase, updateShowcase 
+  createShowcase, deleteShowcase, getShowcase,  truncateShowcase, updateShowcase 
 } from "../controllerrs/showController.js";
 import { 
   createMission, deleteMission, getMission, updateMission 
@@ -68,7 +68,7 @@ showcaseCard.post("/add", uploadMemory.array("images"), createShowcase);
 showcaseCard.put("/update/:id", uploadMemory.array("images"), updateShowcase);
 showcaseCard.get("/read", getShowcase);
 showcaseCard.delete("/delete/:id", deleteShowcase);
-showcaseCard.delete("/truncate", truncateshowCase);
+showcaseCard.delete("/truncate",  truncateShowcase);
 
 // Mission
 const missionCard = express.Router();
