@@ -169,5 +169,5 @@ export {
   createShowcase,
   updateShowcase,
   deleteShowcase,
-  truncateShowcase,
+  truncateShowcase
 };
