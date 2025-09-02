@@ -1,6 +1,14 @@
 import db from "../config/db.js";
 import cloudinary from "../cloudinary/cloud.js";
 import streamifier from "streamifier";
+import multer from "multer";
+
+// Configure Multer to store files in memory (as buffers)
+const storage = multer.memoryStorage();
+export const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max
+});
 
 // Get all home items
 const getHome = (req, res) => {
@@ -14,6 +22,8 @@ const getHome = (req, res) => {
 // Stream upload function
 const streamUpload = (fileBuffer, originalName) => {
   return new Promise((resolve, reject) => {
+    if (!fileBuffer) return reject(new Error("File buffer is undefined"));
+
     const stream = cloudinary.uploader.upload_stream(
       {
         folder: "4k_vision",
@@ -81,7 +91,6 @@ const updateHome = async (req, res) => {
   const files = req.files;
 
   try {
-    // Fetch existing record to get old image URLs
     const selectSql = "SELECT image FROM home WHERE id = $1";
     const record = await new Promise((resolve, reject) =>
       db.query(selectSql, [id], (err, result) => {
@@ -93,18 +102,14 @@ const updateHome = async (req, res) => {
 
     let newImageUrl = record.image;
 
-    // If new files are uploaded, replace old image
-    if (files && files.length > 0) {
-      // Delete old image from Cloudinary
+    if (files && files.length > 0 && files[0].buffer) {
       const oldPublicId = record.image.split("/").slice(-1)[0].split(".")[0];
       await cloudinary.uploader.destroy(`4k_vision/${oldPublicId}`);
 
-      // Upload new image via stream
       const uploadResult = await streamUpload(files[0].buffer, files[0].originalname);
       newImageUrl = uploadResult.secure_url;
     }
 
-    // Update DB record
     const updateSql =
       "UPDATE home SET description = $1, image = $2 WHERE id = $3 RETURNING *";
     db.query(updateSql, [description, newImageUrl, id], (err, result) => {
@@ -133,11 +138,9 @@ const deleteHome = (req, res) => {
     const imageUrl = result.rows[0].image;
     const publicId = imageUrl.split("/").slice(-1)[0].split(".")[0];
 
-    // Delete from Cloudinary
     cloudinary.uploader.destroy(`4k_vision/${publicId}`, (err) => {
       if (err) console.warn("Cloudinary deletion failed:", err.message);
 
-      // Delete from DB
       const deleteSql = "DELETE FROM home WHERE id = $1";
       db.query(deleteSql, [id], (err) => {
         if (err) return res.status(500).json({ error: err.message });
@@ -153,19 +156,11 @@ const truncateHome = (req, res) => {
   db.query(selectSql, async (err, result) => {
     if (err) return res.status(500).json({ error: err.message });
 
-    const images = result.rows.map((row) => {
-      return row.image.split("/").slice(-1)[0].split(".")[0];
-    });
-
-    // Delete images from Cloudinary
-    const destroyPromises = images.map((publicId) =>
-      cloudinary.uploader.destroy(`4k_vision/${publicId}`)
-    );
+    const images = result.rows.map((row) => row.image.split("/").slice(-1)[0].split(".")[0]);
 
     try {
-      await Promise.all(destroyPromises);
+      await Promise.all(images.map((publicId) => cloudinary.uploader.destroy(`4k_vision/${publicId}`)));
 
-      // Truncate table
       db.query("TRUNCATE TABLE home", (err) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json({ message: "All records and images deleted successfully" });
@@ -177,4 +172,4 @@ const truncateHome = (req, res) => {
   });
 };
 
-export { getHome, createHome, updateHome, deleteHome, truncateHome };
+export { getHome, createHome, updateHome, deleteHome, truncateHome, upload };
