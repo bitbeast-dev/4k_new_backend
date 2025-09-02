@@ -12,7 +12,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Middleware
-app.use(cors());
+app.use(
+  cors({
+    origin: "https://www.4k-vision.com",
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    credentials: true, // if you're using cookies / auth headers
+  })
+);
 app.use(express.json());
 
 // Serve uploaded images statically
