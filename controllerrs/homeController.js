@@ -3,25 +3,28 @@ import cloudinary from "../cloudinary/cloud.js";
 import streamifier from "streamifier";
 import multer from "multer";
 
-// Multer memoryStorage setup
+// Multer configuration
 const storage = multer.memoryStorage();
 export const upload = multer({
   storage,
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max per file
 });
 
-// Helper: upload a single file to Cloudinary via stream
-const streamUpload = (fileBuffer, originalName) => {
+// Helper: Upload file to Cloudinary
+const uploadToCloudinary = (fileBuffer, originalName) => {
   return new Promise((resolve, reject) => {
-    if (!fileBuffer) return reject(new Error("File buffer is undefined"));
+    if (!fileBuffer) {
+      return reject(new Error("File buffer is required"));
+    }
 
+    const publicId = originalName.substring(0, originalName.lastIndexOf(".")) || originalName;
+    
     const stream = cloudinary.uploader.upload_stream(
       {
         folder: "4k_vision",
+        public_id: publicId,
         use_filename: true,
         unique_filename: false,
-        public_id:
-          originalName.substring(0, originalName.lastIndexOf(".")) || originalName,
       },
       (error, result) => {
         if (error) reject(error);
@@ -33,139 +36,166 @@ const streamUpload = (fileBuffer, originalName) => {
   });
 };
 
-// ================= GET HOME =================
-export const getHome = (req, res) => {
-  db.query("SELECT * FROM home ORDER BY created_at DESC", (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(result.rows);
+// Helper: Delete image from Cloudinary
+const deleteFromCloudinary = async (imageUrl) => {
+  try {
+    const publicId = imageUrl.split("/").pop().split(".")[0];
+    await cloudinary.uploader.destroy(`4k_vision/${publicId}`);
+  } catch (error) {
+    console.warn("Cloudinary deletion failed:", error.message);
+  }
+};
+
+// Helper: Database query wrapper
+const queryDB = (sql, params = []) => {
+  return new Promise((resolve, reject) => {
+    db.query(sql, params, (err, result) => {
+      if (err) reject(err);
+      else resolve(result);
+    });
   });
+};
+
+// ================= GET HOME =================
+export const getHome = async (req, res) => {
+  try {
+    const result = await queryDB("SELECT * FROM home ORDER BY created_at DESC");
+    res.json(result.rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 };
 
 // ================= CREATE HOME =================
 export const createHome = async (req, res) => {
   try {
-    const { description } = req.body;
+    const { description = "" } = req.body;
     const files = req.files;
 
-    if (!files || files.length === 0) {
+    if (!files?.length) {
       return res.status(400).json({ error: "At least one image is required" });
     }
 
-    // Debug: log files and buffer existence
-    files.forEach(f => {
-      if (!f.buffer) console.error("File missing buffer:", f.originalname);
-    });
+    // Validate file buffers
+    const invalidFiles = files.filter(file => !file.buffer);
+    if (invalidFiles.length > 0) {
+      return res.status(400).json({ error: "Invalid file data received" });
+    }
 
     // Upload all images to Cloudinary
     const uploadResults = await Promise.all(
-      files.map(file => streamUpload(file.buffer, file.originalname))
+      files.map(file => uploadToCloudinary(file.buffer, file.originalname))
     );
 
-    // Prepare DB insert
-    const values = uploadResults.map((result, i) => {
-      const title = files[i].originalname.split(".")[0];
-      return [title, description || "", result.secure_url];
+    // Prepare batch insert
+    const values = [];
+    const placeholders = [];
+    
+    uploadResults.forEach((result, index) => {
+      const title = files[index].originalname.split(".")[0];
+      values.push(title, description, result.secure_url);
+      placeholders.push(`($${values.length - 2}, $${values.length - 1}, $${values.length})`);
     });
 
-    const placeholders = values
-      .map((_, i) => `($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`)
-      .join(", ");
-    const flatValues = values.flat();
+    const sql = `INSERT INTO home (title, description, image) VALUES ${placeholders.join(", ")}`;
+    const result = await queryDB(sql, values);
 
-    const sql = `INSERT INTO home (title, description, image) VALUES ${placeholders}`;
-    db.query(sql, flatValues, (err, result) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.status(201).json({ message: "Images uploaded successfully", insertedRows: result.rowCount });
+    res.status(201).json({ 
+      message: "Images uploaded successfully", 
+      insertedRows: result.rowCount 
     });
   } catch (error) {
-    console.error("Cloudinary upload error:", error);
-    res.status(500).json({ error: error.message || "Failed to upload images" });
+    console.error("Upload error:", error);
+    res.status(500).json({ error: error.message });
   }
 };
 
 // ================= UPDATE HOME =================
 export const updateHome = async (req, res) => {
-  const { id } = req.params;
-  const { description } = req.body;
-  const files = req.files;
-
   try {
-    const record = await new Promise((resolve, reject) =>
-      db.query("SELECT image FROM home WHERE id=$1", [id], (err, result) => {
-        if (err) reject(err);
-        else if (result.rowCount === 0) reject({ notFound: true });
-        else resolve(result.rows[0]);
-      })
-    );
+    const { id } = req.params;
+    const { description } = req.body;
+    const files = req.files;
 
-    let newImageUrl = record.image;
-
-    if (files && files.length > 0 && files[0].buffer) {
-      // Delete old Cloudinary image
-      const oldPublicId = record.image.split("/").slice(-1)[0].split(".")[0];
-      await cloudinary.uploader.destroy(`4k_vision/${oldPublicId}`);
-
-      // Upload new image
-      const uploadResult = await streamUpload(files[0].buffer, files[0].originalname);
-      newImageUrl = uploadResult.secure_url;
+    // Get current record
+    const result = await queryDB("SELECT * FROM home WHERE id = $1", [id]);
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Record not found" });
     }
 
-    db.query(
-      "UPDATE home SET description=$1, image=$2 WHERE id=$3 RETURNING *",
-      [description, newImageUrl, id],
-      (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ message: "Home record updated successfully", record: result.rows[0] });
-      }
+    const currentRecord = result.rows[0];
+    let imageUrl = currentRecord.image;
+
+    // Update image if new file provided
+    if (files?.length > 0 && files[0].buffer) {
+      // Delete old image
+      await deleteFromCloudinary(currentRecord.image);
+      
+      // Upload new image
+      const uploadResult = await uploadToCloudinary(files[0].buffer, files[0].originalname);
+      imageUrl = uploadResult.secure_url;
+    }
+
+    // Update record
+    const updateResult = await queryDB(
+      "UPDATE home SET description = $1, image = $2 WHERE id = $3 RETURNING *",
+      [description || currentRecord.description, imageUrl, id]
     );
+
+    res.json({ 
+      message: "Record updated successfully", 
+      record: updateResult.rows[0] 
+    });
   } catch (error) {
-    if (error.notFound) return res.status(404).json({ error: "Record not found" });
-    console.error(error);
-    res.status(500).json({ error: "Failed to update record" });
+    console.error("Update error:", error);
+    res.status(500).json({ error: error.message });
   }
 };
 
 // ================= DELETE HOME =================
-export const deleteHome = (req, res) => {
-  const { id } = req.params;
+export const deleteHome = async (req, res) => {
+  try {
+    const { id } = req.params;
 
-  db.query("SELECT image FROM home WHERE id=$1", [id], async (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (result.rowCount === 0) return res.status(404).json({ error: "Record not found" });
+    // Get record to delete
+    const result = await queryDB("SELECT image FROM home WHERE id = $1", [id]);
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Record not found" });
+    }
 
     const imageUrl = result.rows[0].image;
-    const publicId = imageUrl.split("/").slice(-1)[0].split(".")[0];
 
-    cloudinary.uploader.destroy(`4k_vision/${publicId}`, (err) => {
-      if (err) console.warn("Cloudinary deletion failed:", err.message);
+    // Delete from Cloudinary
+    await deleteFromCloudinary(imageUrl);
 
-      db.query("DELETE FROM home WHERE id=$1", [id], (err) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ message: "Record deleted successfully" });
-      });
-    });
-  });
+    // Delete from database
+    await queryDB("DELETE FROM home WHERE id = $1", [id]);
+
+    res.json({ message: "Record deleted successfully" });
+  } catch (error) {
+    console.error("Delete error:", error);
+    res.status(500).json({ error: error.message });
+  }
 };
 
 // ================= TRUNCATE HOME =================
-export const truncateHome = (req, res) => {
-  db.query("SELECT image FROM home", async (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
+export const truncateHome = async (req, res) => {
+  try {
+    // Get all image URLs
+    const result = await queryDB("SELECT image FROM home");
+    const imageUrls = result.rows.map(row => row.image);
 
-    const images = result.rows.map(row => row.image.split("/").slice(-1)[0].split(".")[0]);
+    // Delete all images from Cloudinary
+    await Promise.allSettled(
+      imageUrls.map(imageUrl => deleteFromCloudinary(imageUrl))
+    );
 
-    try {
-      await Promise.all(images.map(publicId => cloudinary.uploader.destroy(`4k_vision/${publicId}`)));
-      db.query("TRUNCATE TABLE home", (err) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ message: "All records and images deleted successfully" });
-      });
-    } catch (error) {
-      console.warn("Some Cloudinary deletions failed:", error);
-      res.status(500).json({ error: "Failed to delete all images" });
-    }
-  });
+    // Clear database table
+    await queryDB("TRUNCATE TABLE home");
+
+    res.json({ message: "All records deleted successfully" });
+  } catch (error) {
+    console.error("Truncate error:", error);
+    res.status(500).json({ error: error.message });
+  }
 };
-
-// ================= EXPORT =================
-
