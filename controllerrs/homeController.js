@@ -72,19 +72,42 @@ export const createHome = async (req, res) => {
     const { description = "" } = req.body;
     const files = req.files;
 
+    // Check if files exist
     if (!files?.length) {
       return res.status(400).json({ error: "At least one image is required" });
     }
 
-    // Validate file buffers
-    const invalidFiles = files.filter(file => !file.buffer);
-    if (invalidFiles.length > 0) {
-      return res.status(400).json({ error: "Invalid file data received" });
+    // Filter out files without buffer and log for debugging
+    const validFiles = files.filter(file => {
+      if (!file.buffer) {
+        console.log("File missing buffer:", {
+          fieldname: file.fieldname,
+          originalname: file.originalname,
+          hasBuffer: !!file.buffer,
+          size: file.size
+        });
+        return false;
+      }
+      return true;
+    });
+
+    if (validFiles.length === 0) {
+      console.log("All files invalid. Request details:", {
+        filesCount: files.length,
+        contentType: req.headers['content-type'],
+        files: files.map(f => ({
+          fieldname: f.fieldname,
+          originalname: f.originalname,
+          hasBuffer: !!f.buffer,
+          size: f.size
+        }))
+      });
+      return res.status(400).json({ error: "No valid files received. Check file upload format." });
     }
 
-    // Upload all images to Cloudinary
+    // Upload valid images to Cloudinary
     const uploadResults = await Promise.all(
-      files.map(file => uploadToCloudinary(file.buffer, file.originalname))
+      validFiles.map(file => uploadToCloudinary(file.buffer, file.originalname))
     );
 
     // Prepare batch insert
@@ -92,9 +115,9 @@ export const createHome = async (req, res) => {
     const placeholders = [];
     
     uploadResults.forEach((result, index) => {
-      const title = files[index].originalname.split(".")[0];
+      const title = validFiles[index].originalname.split(".")[0];
       values.push(title, description, result.secure_url);
-      placeholders.push(`($${values.length - 2}, $${values.length - 1}, $${values.length})`);
+      placeholders.push(`(${values.length - 2}, ${values.length - 1}, ${values.length})`);
     });
 
     const sql = `INSERT INTO home (title, description, image) VALUES ${placeholders.join(", ")}`;
@@ -126,14 +149,19 @@ export const updateHome = async (req, res) => {
     const currentRecord = result.rows[0];
     let imageUrl = currentRecord.image;
 
-    // Update image if new file provided
-    if (files?.length > 0 && files[0].buffer) {
-      // Delete old image
-      await deleteFromCloudinary(currentRecord.image);
-      
-      // Upload new image
-      const uploadResult = await uploadToCloudinary(files[0].buffer, files[0].originalname);
-      imageUrl = uploadResult.secure_url;
+    // Update image if new file provided and has valid buffer
+    if (files?.length > 0) {
+      const validFile = files.find(file => file.buffer);
+      if (validFile) {
+        // Delete old image
+        await deleteFromCloudinary(currentRecord.image);
+        
+        // Upload new image
+        const uploadResult = await uploadToCloudinary(validFile.buffer, validFile.originalname);
+        imageUrl = uploadResult.secure_url;
+      } else {
+        console.log("No valid file buffer found in update request");
+      }
     }
 
     // Update record
