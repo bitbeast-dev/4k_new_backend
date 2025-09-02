@@ -12,9 +12,9 @@ const getCategory = async (req, res) => {
 
 // Create new category
 const createCategory = async (req, res) => {
-    const { category } = req.body;
+    const { cat } = req.body;
     try {
-        const result = await db.query("INSERT INTO category (id) VALUES ($1)", [category]);
+        const result = await db.query("INSERT INTO category (id) VALUES ($1)", [cat]);
         res.status(201).json({
             message: "Category Inserted successfully",
             insertedRows: result.rowCount,
