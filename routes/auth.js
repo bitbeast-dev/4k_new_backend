@@ -25,7 +25,7 @@ import {
   createCategory, deleteCategory, getCategory, updateCategory 
 } from "../controllerrs/category.js";
 import { 
-  createteam, deleteteam, getteam, updateteam 
+  createTeam, deleteteam, getteam, updateteam 
 } from "../controllerrs/teamController.js";
 import { 
   createcustomer, deletecustomer, getcustomer, updatecustomer 
