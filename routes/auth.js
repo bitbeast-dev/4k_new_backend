@@ -100,10 +100,10 @@ categoryCard.delete("/delete/:id", deleteCategory);
 
 // Team
 const teamCard = express.Router();
-teamCard.post("/add", uploadMemory.array("images"), createteam);
-teamCard.put("/update/:id", uploadMemory.array("images"), updateteam);
-teamCard.get("/read", getteam);
-teamCard.delete("/delete/:id", deleteteam);
+teamCard.post("/add", uploadMemory.array("images"), createTeam);
+teamCard.put("/update/:id", uploadMemory.array("images"), updateTeam);
+teamCard.get("/read", getTeam);
+teamCard.delete("/delete/:id", deleteTeam);
 
 // Customer
 const customerCard = express.Router();
