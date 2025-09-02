@@ -1,104 +1,134 @@
-import express from "express"
-import multer from "multer"
-import path from "path"
-import { fileURLToPath } from "url"
+import express from "express";
+import multer from "multer";
+import path from "path";
+import { fileURLToPath } from "url";
 
-
-import  { getHome, deleteHome, updateHome, createHome, truncateHome} from "../controllerrs/homeController.js"
-import { createProducts, deleteProducts, getProducts, truncateProducts, updateProducts } from "../controllerrs/productControllers.js"
-import { createShowcase, deleteShowcase, getShowcase, truncateshowCase, updateShowcase } from "../controllerrs/showController.js"
-import { createMission, deleteMission, getMission, updateMission } from "../controllerrs/missionController.js"
-import { createInternship, deleteInternship, getInternship, updateInternship } from "../controllerrs/InternshipController.js"
-import { createValues, deleteValues, getValues, updateValues } from "../controllerrs/valuesController.js"
-import { createCategory, deleteCategory, getCategory, updateCategory } from "../controllerrs/category.js"
-import { createteam, deleteteam, getteam, updateteam } from "../controllerrs/teamController.js"
-import { createcustomer, deletecustomer, getcustomer, updatecustomer } from "../controllerrs/customerController.js"
-import { checkAdmin, createAccount, loginAccount, unlockAdmin } from "../controllerrs/adminController.js"
-
+import { 
+  getHome, deleteHome, updateHome, createHome, truncateHome 
+} from "../controllerrs/homeController.js";
+import { 
+  createProducts, deleteProducts, getProducts, truncateProducts, updateProducts 
+} from "../controllerrs/productControllers.js";
+import { 
+  createShowcase, deleteShowcase, getShowcase, truncateshowCase, updateShowcase 
+} from "../controllerrs/showController.js";
+import { 
+  createMission, deleteMission, getMission, updateMission 
+} from "../controllerrs/missionController.js";
+import { 
+  createInternship, deleteInternship, getInternship, updateInternship 
+} from "../controllerrs/InternshipController.js";
+import { 
+  createValues, deleteValues, getValues, updateValues 
+} from "../controllerrs/valuesController.js";
+import { 
+  createCategory, deleteCategory, getCategory, updateCategory 
+} from "../controllerrs/category.js";
+import { 
+  createteam, deleteteam, getteam, updateteam 
+} from "../controllerrs/teamController.js";
+import { 
+  createcustomer, deletecustomer, getcustomer, updatecustomer 
+} from "../controllerrs/customerController.js";
+import { 
+  checkAdmin, createAccount, loginAccount, unlockAdmin 
+} from "../controllerrs/adminController.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Setup multer storage
-
-
-
-const homeCard=express.Router()
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads"); // store in 'uploads/' folder
-  },
-  filename: (req, file, cb) => {
-    const uniqueName = Date.now() + "-" + file.originalname;
-    cb(null, uniqueName);
-  },
+// ---------- Multer memory storage for Cloudinary uploads ----------
+const memoryStorage = multer.memoryStorage();
+const uploadMemory = multer({ 
+  storage: memoryStorage, 
+  limits: { fileSize: 50 * 1024 * 1024, files: 20 } 
 });
 
-const upload = multer({ storage });
+// ---------- Routers ----------
 
-homeCard.post("/add",upload.array("images"),createHome)
-homeCard.get("/read",getHome)
-homeCard.delete("/delete/:id",deleteHome)
-homeCard.put("/update/:id",updateHome)
-homeCard.delete("/truncate",truncateHome)
+// Home
+const homeCard = express.Router();
+homeCard.post("/add", uploadMemory.array("images"), createHome);
+homeCard.put("/update/:id", uploadMemory.array("images"), updateHome);
+homeCard.get("/read", getHome);
+homeCard.delete("/delete/:id", deleteHome);
+homeCard.delete("/truncate", truncateHome);
 
-const productCard=express.Router()
-productCard.post("/add",upload.array("images"),createProducts)
-productCard.get("/read",getProducts)
-productCard.delete("/delete/:id",deleteProducts)
-productCard.delete("/truncate",truncateProducts)
-productCard.put("/update/:id",updateProducts)
+// Products
+const productCard = express.Router();
+productCard.post("/add", uploadMemory.array("images"), createProducts);
+productCard.put("/update/:id", uploadMemory.array("images"), updateProducts);
+productCard.get("/read", getProducts);
+productCard.delete("/delete/:id", deleteProducts);
+productCard.delete("/truncate", truncateProducts);
 
+// Showcase
+const showcaseCard = express.Router();
+showcaseCard.post("/add", uploadMemory.array("images"), createShowcase);
+showcaseCard.put("/update/:id", uploadMemory.array("images"), updateShowcase);
+showcaseCard.get("/read", getShowcase);
+showcaseCard.delete("/delete/:id", deleteShowcase);
+showcaseCard.delete("/truncate", truncateshowCase);
 
-const showcaseCard=express.Router()
-showcaseCard.post("/add",upload.array("images"),createShowcase)
-showcaseCard.get("/read",getShowcase)
-showcaseCard.delete("/delete/:id",deleteShowcase)
-showcaseCard.put("/update/:id",updateShowcase)
-showcaseCard.delete("/truncate",truncateshowCase)
+// Mission
+const missionCard = express.Router();
+missionCard.post("/add", uploadMemory.array("images"), createMission);
+missionCard.put("/update/:id", uploadMemory.array("images"), updateMission);
+missionCard.get("/read", getMission);
+missionCard.delete("/delete/:id", deleteMission);
 
-const missionCard=express.Router()
-missionCard.post("/add",upload.array("images"),createMission)
-missionCard.get("/read",getMission)
-missionCard.delete("/delete/:id",deleteMission)
-missionCard.put("/update/:id",updateMission)
+// Internship (icon field)
+const internshipCard = express.Router();
+internshipCard.post("/add", uploadMemory.array("icon"), createInternship);
+internshipCard.put("/update/:id", uploadMemory.array("icon"), updateInternship);
+internshipCard.get("/read", getInternship);
+internshipCard.delete("/delete/:id", deleteInternship);
 
-const internshipCard=express.Router()
-internshipCard.post("/add",upload.array("icon"),createInternship)
-internshipCard.get("/read",getInternship)
-internshipCard.delete("/delete/:id",deleteInternship)
-internshipCard.put("/update/:id",updateInternship)
+// Values
+const valuesCard = express.Router();
+valuesCard.post("/add", uploadMemory.array("images"), createValues);
+valuesCard.put("/update/:id", uploadMemory.array("images"), updateValues);
+valuesCard.get("/read", getValues);
+valuesCard.delete("/delete/:id", deleteValues);
 
-const valuesCard=express.Router()
-valuesCard.post("/add",upload.array("images"),createValues)
-valuesCard.get("/read",getValues)
-valuesCard.delete("/delete/:id",deleteValues)
-valuesCard.put("/update/:id",updateValues)
+// Category (no file upload)
+const categoryCard = express.Router();
+categoryCard.post("/add", createCategory);
+categoryCard.put("/update/:cat_id", updateCategory);
+categoryCard.get("/read", getCategory);
+categoryCard.delete("/delete/:id", deleteCategory);
 
-const categoryCard=express.Router()
-categoryCard.post("/add",createCategory)
-categoryCard.get("/read",getCategory)
-categoryCard.delete("/delete/:id",deleteCategory)
-categoryCard.put("/update/:cat_id",updateCategory)
+// Team
+const teamCard = express.Router();
+teamCard.post("/add", uploadMemory.array("images"), createteam);
+teamCard.put("/update/:id", uploadMemory.array("images"), updateteam);
+teamCard.get("/read", getteam);
+teamCard.delete("/delete/:id", deleteteam);
 
-const teamCard=express.Router()
-teamCard.post("/add",upload.array("images"),createteam)
-teamCard.get("/read",getteam)
-teamCard.delete("/delete/:id",deleteteam)
-teamCard.put("/update/:id",updateteam)
+// Customer
+const customerCard = express.Router();
+customerCard.post("/add", uploadMemory.array("images"), createcustomer);
+customerCard.put("/update/:id", uploadMemory.array("images"), updatecustomer);
+customerCard.get("/read", getcustomer);
+customerCard.delete("/delete/:id", deletecustomer);
 
-const customerCard=express.Router()
-customerCard.post("/add",upload.array("images"),createcustomer)
-customerCard.get("/read",getcustomer)
-customerCard.delete("/delete/:id",deletecustomer)
-customerCard.put("/update/:id",updatecustomer)
+// Admin / Users
+const userAdmin = express.Router();
+userAdmin.post("/signup", createAccount);
+userAdmin.post("/login", loginAccount);
+userAdmin.post("/check", checkAdmin);
+userAdmin.put("/unlock", unlockAdmin);
 
-const userAdmin=express.Router()
-userAdmin.post("/signup",createAccount)
-userAdmin.post("/login",loginAccount)
-userAdmin.post("/check",checkAdmin)
-userAdmin.put("/unlock",unlockAdmin)
-export {homeCard,productCard,showcaseCard,missionCard,internshipCard,valuesCard,categoryCard,teamCard,customerCard,userAdmin}
-
-
+// ---------- Export all routers ----------
+export {
+  homeCard,
+  productCard,
+  showcaseCard,
+  missionCard,
+  internshipCard,
+  valuesCard,
+  categoryCard,
+  teamCard,
+  customerCard,
+  userAdmin
+};
