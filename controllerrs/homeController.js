@@ -3,23 +3,14 @@ import cloudinary from "../cloudinary/cloud.js";
 import streamifier from "streamifier";
 import multer from "multer";
 
-// Configure Multer to store files in memory (as buffers)
+// Multer memoryStorage setup for file buffers
 const storage = multer.memoryStorage();
 export const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max per file
 });
 
-// Get all home items
-const getHome = (req, res) => {
-  const sql = "SELECT * FROM home ORDER BY created_at DESC";
-  db.query(sql, (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(result.rows);
-  });
-};
-
-// Stream upload function
+// Helper: Upload a single file buffer to Cloudinary
 const streamUpload = (fileBuffer, originalName) => {
   return new Promise((resolve, reject) => {
     if (!fileBuffer) return reject(new Error("File buffer is undefined"));
@@ -29,8 +20,7 @@ const streamUpload = (fileBuffer, originalName) => {
         folder: "4k_vision",
         use_filename: true,
         unique_filename: false,
-        public_id:
-          originalName.substring(0, originalName.lastIndexOf(".")) || originalName,
+        public_id: originalName.substring(0, originalName.lastIndexOf(".")) || originalName,
       },
       (error, result) => {
         if (error) reject(error);
@@ -42,8 +32,17 @@ const streamUpload = (fileBuffer, originalName) => {
   });
 };
 
-// Create new home item
-const createHome = async (req, res) => {
+// ====================== GET HOME ======================
+export const getHome = (req, res) => {
+  const sql = "SELECT * FROM home ORDER BY created_at DESC";
+  db.query(sql, (err, result) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(result.rows);
+  });
+};
+
+// ====================== CREATE HOME ======================
+export const createHome = async (req, res) => {
   try {
     const { description } = req.body;
     const files = req.files;
@@ -52,48 +51,44 @@ const createHome = async (req, res) => {
       return res.status(400).json({ error: "At least one image is required" });
     }
 
+    // Upload all images to Cloudinary
     const uploadResults = await Promise.all(
       files.map((file) => streamUpload(file.buffer, file.originalname))
     );
 
-    const values = uploadResults.map((result, index) => {
-      const originalName = files[index].originalname;
-      const title =
-        originalName.substring(0, originalName.lastIndexOf(".")) || originalName;
-
+    // Prepare values for DB insert
+    const values = uploadResults.map((result, i) => {
+      const originalName = files[i].originalname;
+      const title = originalName.substring(0, originalName.lastIndexOf(".")) || originalName;
       return [title, description || "", result.secure_url];
     });
 
     const placeholders = values
-      .map((_, index) => `($${index * 3 + 1}, $${index * 3 + 2}, $${index * 3 + 3})`)
+      .map((_, i) => `($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`)
       .join(", ");
-
-    const sql = `INSERT INTO home (title, description, image) VALUES ${placeholders}`;
     const flatValues = values.flat();
 
+    const sql = `INSERT INTO home (title, description, image) VALUES ${placeholders}`;
     db.query(sql, flatValues, (err, result) => {
       if (err) return res.status(500).json({ error: err.message });
-      res.status(201).json({
-        message: "Images uploaded successfully",
-        insertedRows: result.rowCount,
-      });
+      res.status(201).json({ message: "Images uploaded successfully", insertedRows: result.rowCount });
     });
   } catch (error) {
     console.error("Cloudinary upload error:", error);
-    res.status(500).json({ error: "Failed to upload images" });
+    res.status(500).json({ error: error.message || "Failed to upload images" });
   }
 };
 
-// Update home item (description + optional new images)
-const updateHome = async (req, res) => {
+// ====================== UPDATE HOME ======================
+export const updateHome = async (req, res) => {
   const { id } = req.params;
   const { description } = req.body;
   const files = req.files;
 
   try {
-    const selectSql = "SELECT image FROM home WHERE id = $1";
+    // Fetch current record
     const record = await new Promise((resolve, reject) =>
-      db.query(selectSql, [id], (err, result) => {
+      db.query("SELECT image FROM home WHERE id=$1", [id], (err, result) => {
         if (err) reject(err);
         else if (result.rowCount === 0) reject({ notFound: true });
         else resolve(result.rows[0]);
@@ -102,23 +97,26 @@ const updateHome = async (req, res) => {
 
     let newImageUrl = record.image;
 
+    // Replace image if new file uploaded
     if (files && files.length > 0 && files[0].buffer) {
+      // Delete old Cloudinary image
       const oldPublicId = record.image.split("/").slice(-1)[0].split(".")[0];
       await cloudinary.uploader.destroy(`4k_vision/${oldPublicId}`);
 
+      // Upload new image
       const uploadResult = await streamUpload(files[0].buffer, files[0].originalname);
       newImageUrl = uploadResult.secure_url;
     }
 
-    const updateSql =
-      "UPDATE home SET description = $1, image = $2 WHERE id = $3 RETURNING *";
-    db.query(updateSql, [description, newImageUrl, id], (err, result) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({
-        message: "Home record updated successfully",
-        record: result.rows[0],
-      });
-    });
+    // Update DB
+    db.query(
+      "UPDATE home SET description=$1, image=$2 WHERE id=$3 RETURNING *",
+      [description, newImageUrl, id],
+      (err, result) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ message: "Home record updated successfully", record: result.rows[0] });
+      }
+    );
   } catch (error) {
     if (error.notFound) return res.status(404).json({ error: "Record not found" });
     console.error(error);
@@ -126,23 +124,23 @@ const updateHome = async (req, res) => {
   }
 };
 
-// Delete home item (also remove image from Cloudinary)
-const deleteHome = (req, res) => {
+// ====================== DELETE HOME ======================
+export const deleteHome = (req, res) => {
   const { id } = req.params;
 
-  const selectSql = "SELECT image FROM home WHERE id = $1";
-  db.query(selectSql, [id], async (err, result) => {
+  db.query("SELECT image FROM home WHERE id=$1", [id], async (err, result) => {
     if (err) return res.status(500).json({ error: err.message });
     if (result.rowCount === 0) return res.status(404).json({ error: "Record not found" });
 
     const imageUrl = result.rows[0].image;
     const publicId = imageUrl.split("/").slice(-1)[0].split(".")[0];
 
+    // Delete from Cloudinary
     cloudinary.uploader.destroy(`4k_vision/${publicId}`, (err) => {
       if (err) console.warn("Cloudinary deletion failed:", err.message);
 
-      const deleteSql = "DELETE FROM home WHERE id = $1";
-      db.query(deleteSql, [id], (err) => {
+      // Delete from DB
+      db.query("DELETE FROM home WHERE id=$1", [id], (err) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json({ message: "Record deleted successfully" });
       });
@@ -150,10 +148,9 @@ const deleteHome = (req, res) => {
   });
 };
 
-// Truncate home table (also delete all images from Cloudinary)
-const truncateHome = (req, res) => {
-  const selectSql = "SELECT image FROM home";
-  db.query(selectSql, async (err, result) => {
+// ====================== TRUNCATE HOME ======================
+export const truncateHome = (req, res) => {
+  db.query("SELECT image FROM home", async (err, result) => {
     if (err) return res.status(500).json({ error: err.message });
 
     const images = result.rows.map((row) => row.image.split("/").slice(-1)[0].split(".")[0]);
@@ -171,5 +168,3 @@ const truncateHome = (req, res) => {
     }
   });
 };
-
-export { getHome, createHome, updateHome, deleteHome, truncateHome};
