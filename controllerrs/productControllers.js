@@ -1,6 +1,6 @@
 import db from "../config/db.js";
 import cloudinary from "../cloudinary/cloud.js";
-import fs from "fs";
+import streamifier from "streamifier";
 
 // Get all products
 const getProducts = (req, res) => {
@@ -8,6 +8,27 @@ const getProducts = (req, res) => {
   db.query(sql, (err, result) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(result.rows);
+  });
+};
+
+// Helper: Upload a file buffer to Cloudinary
+const uploadToCloudinary = (fileBuffer, originalName) => {
+  return new Promise((resolve, reject) => {
+    const publicId = originalName.substring(0, originalName.lastIndexOf(".")) || originalName;
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: "4k_vision",
+        public_id: publicId,
+        use_filename: true,
+        unique_filename: false,
+        resource_type: "auto",
+      },
+      (error, result) => {
+        if (error) reject(error);
+        else resolve(result);
+      }
+    );
+    streamifier.createReadStream(fileBuffer).pipe(stream);
   });
 };
 
@@ -21,29 +42,36 @@ const createProducts = async (req, res) => {
       return res.status(400).json({ error: "At least one image is required" });
     }
 
-    // Upload images to Cloudinary
-    const uploadPromises = files.map((file) =>
-      cloudinary.uploader.upload(file.path, {
-        folder: "4k_vision",
-        use_filename: true,
-        unique_filename: false,
-      })
-    );
+    // Upload all images to Cloudinary
+    const uploadResults = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (!file.buffer) {
+        console.warn(`Skipping file ${file.originalname} - no buffer`);
+        continue;
+      }
+      const result = await uploadToCloudinary(file.buffer, file.originalname);
+      uploadResults.push(result);
+    }
 
-    const uploadResults = await Promise.all(uploadPromises);
+    if (uploadResults.length === 0) {
+      return res.status(400).json({ error: "No files could be uploaded" });
+    }
 
-    // Prepare values for DB insert
-    const values = uploadResults.map((result, index) => {
-      const originalName = files[index].originalname;
-      const title = originalName.substring(0, originalName.lastIndexOf(".")) || originalName;
-      return [result.secure_url, title, description, price, features, style, quantity, category];
+    // Prepare SQL insertion
+    const values = [];
+    const placeholders = [];
+
+    uploadResults.forEach((upload, index) => {
+      const title = files[index].originalname.split(".")[0] || `file_${index + 1}`;
+      const startIndex = index * 8;
+      values.push(upload.secure_url, title, description, price, features, style, quantity, category);
+      placeholders.push(`($${startIndex + 1}, $${startIndex + 2}, $${startIndex + 3}, $${startIndex + 4}, $${startIndex + 5}, $${startIndex + 6}, $${startIndex + 7}, $${startIndex + 8})`);
     });
 
-    const placeholders = values.map((_, index) => `($${index * 8 + 1}, $${index * 8 + 2}, $${index * 8 + 3}, $${index * 8 + 4}, $${index * 8 + 5}, $${index * 8 + 6}, $${index * 8 + 7}, $${index * 8 + 8})`).join(', ');
-    const sql = `INSERT INTO products (image, title, description, price, features, style, quantity, category) VALUES ${placeholders}`;
-    const flatValues = values.flat();
-    
-    db.query(sql, flatValues, (err, result) => {
+    const sql = `INSERT INTO products (image, title, description, price, features, style, quantity, category) VALUES ${placeholders.join(", ")}`;
+
+    db.query(sql, values, (err, result) => {
       if (err) return res.status(500).json({ error: err.message });
 
       res.status(201).json({
@@ -51,14 +79,10 @@ const createProducts = async (req, res) => {
         insertedRows: result.rowCount,
       });
     });
+
   } catch (error) {
     console.error("Cloudinary upload error:", error);
     res.status(500).json({ error: "Failed to upload images" });
-  } finally {
-    // Remove temp files
-    if (req.files) {
-      req.files.forEach((file) => fs.unlinkSync(file.path));
-    }
   }
 };
 
@@ -85,15 +109,13 @@ const deleteProducts = (req, res) => {
   });
 };
 
+// Truncate products
 const truncateProducts = (req, res) => {
   const sql = "TRUNCATE TABLE products";
   db.query(sql, (err, result) => {
     if (err) return res.status(500).json({ error: err.message });
-
     res.json({ message: "All products successfully deleted" });
   });
 };
 
-
-
-export { getProducts, createProducts, updateProducts, deleteProducts ,truncateProducts};
+export { getProducts, createProducts, updateProducts, deleteProducts, truncateProducts };
