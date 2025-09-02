@@ -1,6 +1,24 @@
 import db from "../config/db.js";
 import cloudinary from "../cloudinary/cloud.js";
-import fs from "fs";
+import streamifier from "streamifier";
+
+// Helper: upload buffer to Cloudinary
+const uploadToCloudinary = (file) => {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: "4k_vision/team",
+        use_filename: true,
+        unique_filename: false,
+      },
+      (error, result) => {
+        if (error) reject(error);
+        else resolve(result);
+      }
+    );
+    streamifier.createReadStream(file.buffer).pipe(stream);
+  });
+};
 
 // Get all team members
 const getTeam = (req, res) => {
@@ -21,16 +39,10 @@ const createTeam = async (req, res) => {
       return res.status(400).json({ error: "No files provided" });
     }
 
-    // Upload to Cloudinary
-    const uploadPromises = files.map((file) =>
-      cloudinary.uploader.upload(file.path, {
-        folder: "4k_vision/team",
-        use_filename: true,
-        unique_filename: false,
-      })
+    // Upload using buffer
+    const uploadResults = await Promise.all(
+      files.map((file) => uploadToCloudinary(file))
     );
-
-    const uploadResults = await Promise.all(uploadPromises);
 
     // Prepare values for DB insert
     const values = uploadResults.map((result, index) => {
@@ -60,11 +72,6 @@ const createTeam = async (req, res) => {
   } catch (error) {
     console.error("Cloudinary upload error:", error);
     res.status(500).json({ error: "Failed to upload team images" });
-  } finally {
-    // Always remove temp files
-    if (req.files) {
-      req.files.forEach((file) => fs.unlinkSync(file.path));
-    }
   }
 };
 
@@ -96,7 +103,7 @@ const deleteTeam = (req, res) => {
 // Truncate team table (delete all members)
 const truncateTeam = (req, res) => {
   const sql = "TRUNCATE TABLE team";
-  db.query(sql, (err, result) => {
+  db.query(sql, (err) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ message: "All team members deleted successfully" });
   });
