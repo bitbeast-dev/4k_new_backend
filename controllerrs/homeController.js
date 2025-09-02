@@ -3,11 +3,15 @@ import cloudinary from "../cloudinary/cloud.js";
 import streamifier from "streamifier";
 import multer from "multer";
 
-// Multer configuration
+// Multer configuration - NO RESTRICTIONS AT ALL
 const storage = multer.memoryStorage();
 export const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max per file
+  limits: { 
+    fileSize: 50 * 1024 * 1024, // 50MB max per file
+    files: 20 // Allow up to 20 files
+  }
+  // NO fileFilter - accepts ALL file types
 });
 
 // Helper: Upload file to Cloudinary
@@ -25,6 +29,7 @@ const uploadToCloudinary = (fileBuffer, originalName) => {
         public_id: publicId,
         use_filename: true,
         unique_filename: false,
+        resource_type: "auto" // Auto-detect any file type
       },
       (error, result) => {
         if (error) reject(error);
@@ -72,61 +77,68 @@ export const createHome = async (req, res) => {
     const { description = "" } = req.body;
     const files = req.files;
 
-    // Check if files exist
-    if (!files?.length) {
-      return res.status(400).json({ error: "At least one image is required" });
+    console.log("Received files:", files?.length || 0);
+    console.log("Content-Type:", req.headers['content-type']);
+
+    // Accept ANY files - just check if they exist
+    if (!files || files.length === 0) {
+      return res.status(400).json({ error: "At least one file is required" });
     }
 
-    // Filter out files without buffer and log for debugging
-    const validFiles = files.filter(file => {
-      if (!file.buffer) {
-        console.log("File missing buffer:", {
-          fieldname: file.fieldname,
-          originalname: file.originalname,
-          hasBuffer: !!file.buffer,
-          size: file.size
-        });
-        return false;
+    // Process ALL files - no filtering whatsoever
+    const uploadResults = [];
+    
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      
+      // Only skip if completely no buffer at all
+      if (file && file.buffer) {
+        try {
+          const result = await uploadToCloudinary(file.buffer, file.originalname);
+          uploadResults.push({ result, originalname: file.originalname });
+          console.log(`File ${i + 1} uploaded:`, file.originalname);
+        } catch (uploadError) {
+          console.error(`Failed to upload ${file.originalname}:`, uploadError.message);
+          // Continue with other files
+        }
+      } else {
+        console.log(`Skipping file ${i + 1} - no buffer:`, file?.originalname);
       }
-      return true;
-    });
-
-    if (validFiles.length === 0) {
-      console.log("All files invalid. Request details:", {
-        filesCount: files.length,
-        contentType: req.headers['content-type'],
-        files: files.map(f => ({
-          fieldname: f.fieldname,
-          originalname: f.originalname,
-          hasBuffer: !!f.buffer,
-          size: f.size
-        }))
-      });
-      return res.status(400).json({ error: "No valid files received. Check file upload format." });
     }
 
-    // Upload valid images to Cloudinary
-    const uploadResults = await Promise.all(
-      validFiles.map(file => uploadToCloudinary(file.buffer, file.originalname))
-    );
+    if (uploadResults.length === 0) {
+      return res.status(400).json({ error: "No files could be uploaded" });
+    }
 
-    // Prepare batch insert
+    // FIXED: Correct SQL placeholder generation
     const values = [];
     const placeholders = [];
     
-    uploadResults.forEach((result, index) => {
-      const title = validFiles[index].originalname.split(".")[0];
-      values.push(title, description, result.secure_url);
-      placeholders.push(`(${values.length - 2}, ${values.length - 1}, ${values.length})`);
+    uploadResults.forEach((upload, index) => {
+      const title = upload.originalname.split(".")[0] || `file_${index + 1}`;
+      const startIndex = index * 3;
+      
+      // Add values in order: title, description, image_url
+      values.push(title, description, upload.result.secure_url);
+      
+      // Create proper PostgreSQL placeholders: $1, $2, $3, $4, $5, $6, etc.
+      placeholders.push(`($${startIndex + 1}, $${startIndex + 2}, $${startIndex + 3})`);
     });
 
     const sql = `INSERT INTO home (title, description, image) VALUES ${placeholders.join(", ")}`;
+    
+    console.log("SQL:", sql);
+    console.log("Values count:", values.length);
+    
     const result = await queryDB(sql, values);
 
     res.status(201).json({ 
-      message: "Images uploaded successfully", 
-      insertedRows: result.rowCount 
+      message: "Files uploaded successfully", 
+      insertedRows: result.rowCount,
+      totalFiles: files.length,
+      successfulUploads: uploadResults.length
     });
+
   } catch (error) {
     console.error("Upload error:", error);
     res.status(500).json({ error: error.message });
@@ -149,18 +161,18 @@ export const updateHome = async (req, res) => {
     const currentRecord = result.rows[0];
     let imageUrl = currentRecord.image;
 
-    // Update image if new file provided and has valid buffer
-    if (files?.length > 0) {
-      const validFile = files.find(file => file.buffer);
-      if (validFile) {
+    // Update image if ANY file provided (no restrictions)
+    if (files && files.length > 0 && files[0] && files[0].buffer) {
+      try {
         // Delete old image
         await deleteFromCloudinary(currentRecord.image);
         
-        // Upload new image
-        const uploadResult = await uploadToCloudinary(validFile.buffer, validFile.originalname);
+        // Upload new file
+        const uploadResult = await uploadToCloudinary(files[0].buffer, files[0].originalname);
         imageUrl = uploadResult.secure_url;
-      } else {
-        console.log("No valid file buffer found in update request");
+      } catch (uploadError) {
+        console.error("Failed to update image:", uploadError.message);
+        // Keep old image URL if upload fails
       }
     }
 
