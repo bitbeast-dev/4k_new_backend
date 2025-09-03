@@ -9,7 +9,7 @@ const uploadToCloudinary = (file) => {
       {
         folder: "4k_vision/team",
         use_filename: true,
-        unique_filename: false,
+        unique_filename: true,
       },
       (error, result) => {
         if (error) reject(error);
