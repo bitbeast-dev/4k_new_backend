@@ -90,7 +90,7 @@ const createProducts = async (req, res) => {
 const updateProducts = (req, res) => {
   const { ID } = req.params;
   const { description, price, category } = req.body;
-  const sql = "UPDATE products SET description = $1, price = $2, category = $3 WHERE ID = $4";
+  const sql = "UPDATE products SET description = $1, price = $2, category = $3 WHERE "ID" = $4";
   db.query(sql, [description, price, category, ID], (err, result) => {
     if (err) return res.status(500).json({ error: err.message });
     if (result.rowCount === 0) return res.status(404).json({ error: "Record not found" });
