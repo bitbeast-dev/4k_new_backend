@@ -102,7 +102,7 @@ const updateProducts = (req, res) => {
 const deleteProducts = (req, res) => {
   const { id } = req.params;
   const sql = "DELETE FROM products WHERE id = $1";
-  db.query(sql, [ID], (err, result) => {
+  db.query(sql, [id], (err, result) => {
     if (err) return res.status(500).json({ error: err.message });
     if (result.rowCount === 0) return res.status(404).json({ error: "Record not found" });
     res.json({ message: "Product successfully deleted" });
